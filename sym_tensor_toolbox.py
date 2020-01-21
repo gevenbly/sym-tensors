@@ -940,7 +940,7 @@ def retrieve_blocks(indices: List[SymIndex], arrows: np.ndarray, partition_loc: 
       # calculate number of non-zero elements in each row of the matrix
       row_ind = combine_indices_reduced(indices[:partition_loc], arrows[:partition_loc], block_qnums)
       row_num_nz = col_degen[col_to_block[row_ind.ind_labels]]
-      cumulate_num_nz = np.insert(np.cumsum(row_num_nz[0:-1]),0,0)
+      cumulate_num_nz = np.insert(np.cumsum(row_num_nz[0:-1]),0,0).astype(np.uint32)
       
       # calculate mappings for the position in datavector of each block 
       if num_blocks < 15:
@@ -953,7 +953,7 @@ def retrieve_blocks(indices: List[SymIndex], arrows: np.ndarray, partition_loc: 
       
       # block_dims = np.array([row_degen[row_to_block],col_degen[col_to_block]], dtype=np.uint32)
       block_dims = np.array([[row_degen[row_to_block[n]],col_degen[col_to_block[n]]] for n in range(num_blocks)],dtype=np.uint32).T
-      block_maps = [(cumulate_num_nz[row_locs[n,:]][:,None] + np.arange(block_dims[1,n])[None,:]).ravel() for n in range(num_blocks)]
+      block_maps = [(cumulate_num_nz[row_locs[n,:]][:,None] + np.arange(block_dims[1,n], dtype=np.uint32)[None,:]).ravel() for n in range(num_blocks)]
     
       return block_maps, block_qnums, block_dims
   
@@ -1208,7 +1208,7 @@ def unreshape_order(order: np.ndarray, partitions: np.ndarray) -> np.ndarray:
     cumul_ind_num = np.insert(np.cumsum(partitions),0,0)
     return np.concatenate([trivial_ord[cumul_ind_num[n]:cumul_ind_num[n+1]] for n in order])
     
-   
+
   
   
   
