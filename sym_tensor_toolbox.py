@@ -509,12 +509,19 @@ class SymTensor:
     new_indices = [self.indices[full_ord[n]] for n in range(full_num_inds)]
     new_arrows = self.arrows[full_ord]
     
-    # find block maps for original and permuted tensors
-    block_maps0, block_qnums0, block_dims0 = retrieve_transpose_blocks(self.indices, self.arrows, new_partition_loc, full_ord)
-    block_maps1, block_qnums1, block_dims1 = retrieve_blocks(new_indices, new_arrows, new_partition_loc)
+    if self.data.size == 0:
+      # special case: trivial tensor
+      new_data = np.array([],dtype=self.data.dtype)
+      
+    else:
+      # general case
     
-    new_data = np.zeros(len(self.data), dtype=self.data.dtype)
-    new_data[np.concatenate(block_maps1)] = self.data[np.concatenate(block_maps0)]
+      # find block maps for original and permuted tensors
+      block_maps0, block_qnums0, block_dims0 = retrieve_transpose_blocks(self.indices, self.arrows, new_partition_loc, full_ord)
+      block_maps1, block_qnums1, block_dims1 = retrieve_blocks(new_indices, new_arrows, new_partition_loc)
+      
+      new_data = np.zeros(len(self.data), dtype=self.data.dtype)
+      new_data[np.concatenate(block_maps1)] = self.data[np.concatenate(block_maps0)]
     
     return SymTensor(new_data, new_indices, new_arrows, self.partitions[perm_ord], self.divergence)
   
@@ -619,7 +626,7 @@ def identity_charges(syms) -> np.ndarray:
   Returns:
     nd.array: vector of identity charges for each symmetry in self 
   """
-  identity_charges = np.zeros(len(syms),dtype=int)
+  identity_charges = np.zeros(len(syms),dtype=np.int16)
   for n in range(len(syms)):
     if syms[n] == 'U1':
       identity_charges[n] = 0
@@ -904,8 +911,8 @@ def retrieve_blocks(indices: List[SymIndex], arrows: np.ndarray, partition_loc: 
       tensor is viewed as a matrix between first partition_loc indices and 
       the remaining indices).
   Returns:
-    block_maps (List[np.ndarray]): list of integer arrays, which each 
-      containing the location of a symmetry block in the data vector.
+    block_maps (List[np.ndarray]): list of integer arrays, each of which 
+      contain the location of a symmetry block in the data vector.
     block_qnums (np.ndarray): n-by-m array describing qauntum numbers of each 
       block, with 'n' the number of symmetries and 'm' the number of blocks.
     block_dims (np.ndarray): 2-by-m array describing the dims each block, 
@@ -942,7 +949,7 @@ def retrieve_blocks(indices: List[SymIndex], arrows: np.ndarray, partition_loc: 
       row_num_nz = col_degen[col_to_block[row_ind.ind_labels]]
       cumulate_num_nz = np.insert(np.cumsum(row_num_nz[0:-1]),0,0).astype(np.uint32)
       
-      # calculate mappings for the position in datavector of each block 
+      # calculate mappings for the position in data-vector of each block 
       if num_blocks < 15:
         # faster method for small number of blocks
         row_locs = np.concatenate([(row_ind.ind_labels==n) for n in range(num_blocks)]).reshape(num_blocks,row_ind.dim)
@@ -951,7 +958,6 @@ def retrieve_blocks(indices: List[SymIndex], arrows: np.ndarray, partition_loc: 
         row_locs = np.zeros([num_blocks,row_ind.dim],dtype=bool)
         row_locs[row_ind.ind_labels,np.arange(row_ind.dim)] = np.ones(row_ind.dim,dtype=bool)
       
-      # block_dims = np.array([row_degen[row_to_block],col_degen[col_to_block]], dtype=np.uint32)
       block_dims = np.array([[row_degen[row_to_block[n]],col_degen[col_to_block[n]]] for n in range(num_blocks)],dtype=np.uint32).T
       block_maps = [(cumulate_num_nz[row_locs[n,:]][:,None] + np.arange(block_dims[1,n], dtype=np.uint32)[None,:]).ravel() for n in range(num_blocks)]
     
@@ -980,21 +986,81 @@ def retrieve_transpose_blocks(indices: List[SymIndex], arrows: np.ndarray, parti
       with 'm' the number of blocks).
   """
   if np.array_equal(transpose_order,None) or (np.array_equal(np.array(transpose_order), np.arange(len(indices)))):
-    # no transpose order
+    #  special case: no transpose order
     return retrieve_blocks(indices, arrows, partition_loc)
   
-  else:
-    # non-trivial transposition is required
-    num_inds = len(indices)
-    tensor_dims = np.array([indices[n].dim for n in range(num_inds)],dtype=int)
-    strides = np.append(np.flip(np.cumprod(np.flip(tensor_dims[1:]))),1)
+  # general case: non-trivial transposition is required
+  num_inds = len(indices)
+  tensor_dims = np.array([indices[n].dim for n in range(num_inds)],dtype=int)
+  strides = np.append(np.flip(np.cumprod(np.flip(tensor_dims[1:]))),1)
     
-    # define properties of new tensor resulting from transposition
-    new_strides = strides[transpose_order]
-    new_row_indices = [indices[n] for n in transpose_order[:partition_loc]]
-    new_col_indices = [indices[n] for n in transpose_order[partition_loc:]]
-    new_row_arrows = arrows[transpose_order[:partition_loc]]
-    new_col_arrows = arrows[transpose_order[partition_loc:]]
+  # compute qnums of row/cols in original tensor
+  orig_partition_loc = find_balanced_partition(tensor_dims)
+  orig_width = np.prod(tensor_dims[orig_partition_loc:])
+  
+  orig_unique_row_qnums = compute_qnum_degen(indices[:orig_partition_loc], arrows[:orig_partition_loc])[0]
+  orig_unique_col_qnums, orig_col_degen = compute_qnum_degen(indices[orig_partition_loc:], np.logical_not(arrows[orig_partition_loc:]))
+  orig_block_qnums, row_map, col_map = intersect2d(orig_unique_row_qnums, orig_unique_col_qnums, axis=1, return_indices = True)
+  orig_num_blocks = orig_block_qnums.shape[1]
+  
+  if orig_num_blocks == 0:
+    # special case: trivial number of non-zero elements
+    return [], np.array([], dtype=np.uint32), np.array([], dtype=np.uint32)
+  
+  orig_row_ind = combine_indices(indices[:orig_partition_loc], arrows[:orig_partition_loc])
+  orig_col_ind = combine_indices(indices[orig_partition_loc:], np.logical_not(arrows[orig_partition_loc:]))
+  
+  # compute row degens (i.e. number of non-zero elements per row)
+  inv_row_map = -np.ones(orig_unique_row_qnums.shape[1],dtype=np.int16)
+  for n in range(len(row_map)):
+    inv_row_map[row_map[n]] = n
+    
+  all_degens = np.append(orig_col_degen[col_map],0)[inv_row_map[orig_row_ind.ind_labels]]
+  all_cumul_degens = np.cumsum(np.insert(all_degens[:-1],0,0)).astype(np.uint32)
+  
+  # generate vector which translates from dense row position to sparse row position
+  dense_to_sparse = np.zeros(orig_width,dtype=np.uint32)
+  for n in range(orig_num_blocks):
+    dense_to_sparse[orig_col_ind.ind_labels == col_map[n]] = np.arange(orig_col_degen[col_map[n]],dtype=np.uint32)
+    
+  # define properties of new tensor resulting from transposition
+  new_strides = strides[transpose_order]
+  new_row_indices = [indices[n] for n in transpose_order[:partition_loc]]
+  new_col_indices = [indices[n] for n in transpose_order[partition_loc:]]
+  new_row_arrows = arrows[transpose_order[:partition_loc]]
+  new_col_arrows = arrows[transpose_order[partition_loc:]]
+  
+  if (partition_loc == 0):
+    # special case: reshape into row vector
+    
+    # compute qnums of row/cols in transposed tensor
+    unique_col_qnums, new_col_degen = compute_qnum_degen(new_col_indices, np.logical_not(new_col_arrows))
+    block_qnums, new_row_map, new_col_map = intersect2d(identity_charges(indices[0].syms), unique_col_qnums, axis=1, return_indices = True)
+    block_dims = np.array([[1],new_col_degen[new_col_map]], dtype=np.uint32)
+    num_blocks = 1
+    col_ind, col_locs = combine_indices_reduced(new_col_indices, np.logical_not(new_col_arrows), block_qnums, return_locs=True, strides=new_strides[partition_loc:])
+    
+    # find location of blocks in transposed tensor (w.r.t positions in original)
+    orig_row_posR, orig_col_posR = np.divmod(col_locs[col_ind.ind_labels == 0], orig_width)
+    block_maps = [(all_cumul_degens[orig_row_posR] + dense_to_sparse[orig_col_posR]).ravel()]
+
+  elif (partition_loc == len(indices)):
+    # special case: reshape into col vector
+    
+    # compute qnums of row/cols in transposed tensor
+    unique_row_qnums, new_row_degen = compute_qnum_degen(new_row_indices, new_row_arrows)
+    
+    block_qnums, new_row_map, new_col_map = intersect2d(unique_row_qnums, identity_charges(indices[0].syms), axis=1, return_indices = True)
+    block_dims = np.array([new_row_degen[new_row_map],[1]], dtype=np.uint32)
+    num_blocks = 1
+    row_ind, row_locs = combine_indices_reduced(new_row_indices, new_row_arrows, block_qnums, return_locs=True, strides=new_strides[:partition_loc])
+    
+    # find location of blocks in transposed tensor (w.r.t positions in original)
+    orig_row_posL, orig_col_posL = np.divmod(row_locs[row_ind.ind_labels == 0], orig_width)
+    block_maps = [(all_cumul_degens[orig_row_posL] + dense_to_sparse[orig_col_posL]).ravel()]
+    
+  else:
+    # general case: reshape into a matrix
     
     # compute qnums of row/cols in transposed tensor
     unique_row_qnums, new_row_degen = compute_qnum_degen(new_row_indices, new_row_arrows)
@@ -1006,39 +1072,15 @@ def retrieve_transpose_blocks(indices: List[SymIndex], arrows: np.ndarray, parti
     row_ind, row_locs = combine_indices_reduced(new_row_indices, new_row_arrows, block_qnums, return_locs=True, strides=new_strides[:partition_loc])
     col_ind, col_locs = combine_indices_reduced(new_col_indices, np.logical_not(new_col_arrows), block_qnums, return_locs=True, strides=new_strides[partition_loc:])
     
-    # compute qnums of row/cols in original tensor
-    orig_partition_loc = find_balanced_partition(tensor_dims)
-    orig_width = np.prod(tensor_dims[orig_partition_loc:])
-    
-    orig_unique_row_qnums = compute_qnum_degen(indices[:orig_partition_loc], arrows[:orig_partition_loc])[0]
-    orig_unique_col_qnums, orig_col_degen = compute_qnum_degen(indices[orig_partition_loc:], np.logical_not(arrows[orig_partition_loc:]))
-    orig_block_qnums, row_map, col_map = intersect2d(orig_unique_row_qnums, orig_unique_col_qnums, axis=1, return_indices = True)
-    orig_num_blocks = orig_block_qnums.shape[1]
-    
-    orig_row_ind = combine_indices(indices[:orig_partition_loc], arrows[:orig_partition_loc])
-    orig_col_ind = combine_indices(indices[orig_partition_loc:], np.logical_not(arrows[orig_partition_loc:]))
-    
-    # compute row degens (i.e. number of non-zero elements per row)
-    inv_row_map = -np.ones(orig_unique_row_qnums.shape[1],dtype=np.int16)
-    for n in range(len(row_map)):
-      inv_row_map[row_map[n]] = n
-      
-    all_degens = np.append(orig_col_degen[col_map],0)[inv_row_map[orig_row_ind.ind_labels]]
-    all_cumul_degens = np.cumsum(np.insert(all_degens[:-1],0,0)).astype(np.uint32)
-    
-    # generate vector which translates from dense row position to sparse row position
-    dense_to_sparse = np.zeros(orig_width,dtype=np.uint32)
-    for n in range(orig_num_blocks):
-      dense_to_sparse[orig_col_ind.ind_labels == col_map[n]] = np.arange(orig_col_degen[col_map[n]],dtype=np.uint32)
-    
+    # find location of blocks in transposed tensor (w.r.t positions in original)
     block_maps = [0]*num_blocks
     for n in range(num_blocks):
       orig_row_posL, orig_col_posL = np.divmod(row_locs[row_ind.ind_labels == n], orig_width)
       orig_row_posR, orig_col_posR = np.divmod(col_locs[col_ind.ind_labels == n], orig_width)
       block_maps[n] = (all_cumul_degens[np.add.outer(orig_row_posL,orig_row_posR)] +
                        dense_to_sparse[np.add.outer(orig_col_posL,orig_col_posR)]).ravel()
-    
-    return block_maps, block_qnums, block_dims
+  
+  return block_maps, block_qnums, block_dims
 
 #########################################
 def tensordot(A: SymTensor, B: SymTensor, axes: int=2) -> SymTensor:
@@ -1055,18 +1097,32 @@ def tensordot(A: SymTensor, B: SymTensor, axes: int=2) -> SymTensor:
   Returns:
     SymTensor: SymTensor corresponding to the tensor dot product of the input.
   """
-  if axes == 0: # do outer product
-    return outerproduct(A,B)
+  
+  # transform input the standard form
+  if type(axes) == int:
+    axes = [np.arange(A.ndim-axes,A.ndim,dtype=np.int16),np.arange(0,axes,dtype=np.int16)]
+  elif type(axes[0]) == int:
+    axes = [np.array(axes,dtype=np.int16),np.array(axes,dtype=np.int16)]  
+  else:
+    axes = [np.array(axes[0],dtype=np.int16),np.array(axes[1],dtype=np.int16)]
+  
+  # find free indices and index permutation orders (in reshaped indices)
+  A_free_res = np.array([np.arange(A.ndim)[n] for n in range(A.ndim) if (np.intersect1d(axes[0],n).size == 0)], dtype=np.int16)
+  B_free_res = np.array([np.arange(B.ndim)[n] for n in range(B.ndim) if (np.intersect1d(axes[1],n).size == 0)], dtype=np.int16)
+  A_perm_ord_res = np.concatenate([A_free_res, axes[0]])
+  B_perm_ord_res = np.concatenate([axes[1], B_free_res])
+  
+  if axes[0].size == 0: 
+    # special case: do outer product
+    return outerproduct(A.transpose(A_perm_ord_res),B.transpose(B_perm_ord_res))
     
-  else: # do tensor contraction
-    # transform input the standard form
-    if type(axes) == int:
-      axes = [np.arange(A.ndim-axes,A.ndim,dtype=np.int16),np.arange(0,axes,dtype=np.int16)]
-    elif type(axes[0]) == int:
-      axes = [np.array(axes,dtype=np.int16),np.array(axes,dtype=np.int16)]  
-    else:
-      axes = [np.array(axes[0],dtype=np.int16),np.array(axes[1],dtype=np.int16)]
+  elif (len(axes[0]) == A.ndim) and (len(axes[1]) == B.ndim):
+    # special case: do inner product
+    return innerproduct(A.transpose(A_perm_ord_res),B.transpose(B_perm_ord_res))
       
+  else:
+    # general case: do matrix product
+    
     # find free indices and index permutation orders (in original indices)
     A_axes = unreshape_order(axes[0], A.partitions)
     B_axes = unreshape_order(axes[1], B.partitions)
@@ -1074,10 +1130,6 @@ def tensordot(A: SymTensor, B: SymTensor, axes: int=2) -> SymTensor:
     B_free = np.array([np.arange(B.ndim_orig)[n] for n in range(B.ndim_orig) if (np.intersect1d(B_axes,n).size == 0)], dtype=np.int16)
     A_perm_ord = np.concatenate([A_free,A_axes])
     B_perm_ord = np.concatenate([B_axes,B_free])
-    
-    # find free indices and index permutation orders (in reshaped indices)
-    A_free_res = np.array([np.arange(A.ndim)[n] for n in range(A.ndim) if (np.intersect1d(axes[0],n).size == 0)], dtype=np.int16)
-    B_free_res = np.array([np.arange(B.ndim)[n] for n in range(B.ndim) if (np.intersect1d(axes[1],n).size == 0)], dtype=np.int16)
     
     # initialize output tensor properties
     A_free_ind = [A.indices[A_free[nA]] for nA in range(len(A_free))]
@@ -1088,28 +1140,29 @@ def tensordot(A: SymTensor, B: SymTensor, axes: int=2) -> SymTensor:
     C_data = np.zeros(compute_num_nonzero(C_indices, C_arrows), dtype=A.data.dtype)
     C_partitions = np.concatenate([A.partitions[A_free_res], B.partitions[B_free_res]])
     
-    # find blocks from each tensor
-    t0 = time.time()
-    A_block_maps, A_block_qnums, A_block_dims = retrieve_transpose_blocks(A.indices, A.arrows, len(A_free), A_perm_ord)
-    B_block_maps, B_block_qnums, B_block_dims = retrieve_transpose_blocks(B.indices, B.arrows, len(B_axes), B_perm_ord)
-    C_block_maps, C_block_qnums, C_block_dims = retrieve_blocks(C_indices, C_arrows, len(A_free))
-    print("time for block comp:", time.time() - t0)  
-    
-    # construct map between qnum labels for each tensor
-    common_qnums, A_to_common, B_to_common = intersect2d(A_block_qnums, B_block_qnums, axis=1, return_indices=True)
-    C_to_common = intersect2d(C_block_qnums, common_qnums, axis=1, return_indices=True)[1]
-    
-    # perform tensor contraction oone block at a time
-    t1 = time.time()
-    for n in range(common_qnums.shape[1]):
-      nA = A_to_common[n]
-      nB = B_to_common[n] 
-      nC = C_to_common[n] 
+    if ((len(A.data) > 0) and (len(B.data) > 0)) and (len(C_data) > 0):
+      # find blocks from each tensor
+      ### t0 = time.time()
+      A_block_maps, A_block_qnums, A_block_dims = retrieve_transpose_blocks(A.indices, A.arrows, len(A_free), A_perm_ord)
+      B_block_maps, B_block_qnums, B_block_dims = retrieve_transpose_blocks(B.indices, B.arrows, len(B_axes), B_perm_ord)
+      C_block_maps, C_block_qnums, C_block_dims = retrieve_blocks(C_indices, C_arrows, len(A_free))
+      ### print("time for block comp:", time.time() - t0)  
       
-      C_data[C_block_maps[nC].ravel()] = (A.data[A_block_maps[nA].reshape(A_block_dims[:,nA])] @ 
-                                         B.data[B_block_maps[nB].reshape(B_block_dims[:,nB])]).ravel()
+      # construct map between qnum labels for each tensor
+      common_qnums, A_to_common, B_to_common = intersect2d(A_block_qnums, B_block_qnums, axis=1, return_indices=True)
+      C_to_common = intersect2d(C_block_qnums, common_qnums, axis=1, return_indices=True)[1]
+      
+      # perform tensor contraction oone block at a time
+      ### t1 = time.time()
+      for n in range(common_qnums.shape[1]):
+        nA = A_to_common[n]
+        nB = B_to_common[n] 
+        nC = C_to_common[n] 
+        
+        C_data[C_block_maps[nC].ravel()] = (A.data[A_block_maps[nA].reshape(A_block_dims[:,nA])] @ 
+                                           B.data[B_block_maps[nB].reshape(B_block_dims[:,nB])]).ravel()
     
-    print("time for mults:", time.time() - t1)  
+    ### print("time for mults:", time.time() - t1)  
     return SymTensor(C_data, C_indices, C_arrows, C_partitions)
   
 #########################################
@@ -1130,14 +1183,29 @@ def outerproduct(A: SymTensor, B: SymTensor) -> SymTensor:
   C_data = np.zeros(compute_num_nonzero(C_indices, C_arrows), dtype=A.data.dtype)
   C_partitions = np.concatenate([A.partitions, B.partitions])
   
-  # find the location of the zero block in the output
-  C_block_maps, C_block_qnums, C_block_dims = retrieve_blocks(C_indices, C_arrows, A.ndim)
-  zero_block_label = intersect2d(C_block_qnums, identity_charges(A.indices[0].syms), axis=1, return_indices=True)[1].item()
-
-  # store the result of the outer product in the output tensor data
-  C_data[C_block_maps[zero_block_label].ravel()] = np.outer(A.data, B.data).ravel()
+  if ((len(A.data) > 0) and (len(B.data) > 0)) and (len(C_data) > 0):
+    # find the location of the zero block in the output
+    C_block_maps, C_block_qnums, C_block_dims = retrieve_blocks(C_indices, C_arrows, A.ndim)
+    zero_block_label = intersect2d(C_block_qnums, identity_charges(A.indices[0].syms), axis=1, return_indices=True)[1].item()
+  
+    # store the result of the outer product in the output tensor data
+    C_data[C_block_maps[zero_block_label].ravel()] = np.outer(A.data, B.data).ravel()
   
   return SymTensor(C_data, C_indices, C_arrows, partitions=C_partitions)
+
+#########################################
+def innerproduct(A: SymTensor, B: SymTensor) -> float:
+  """
+  Compute the inner product of two SymTensor of matching dimensions.
+  Args:
+    A (SymTensor): first input SymTensor (automatically flattened if not 
+      already 1-dimensional).
+    B (SymTensor): second input SymTensor (automatically flattened if not 
+      already 1-dimensional).
+  Returns:
+    float: the scalar product of the two tensors.
+  """
+  return np.dot(A.data, B.data)
   
 #########################################
 def compute_dense_pos(indices: List[SymIndex], arrows: np.ndarray) -> np.ndarray:
@@ -1209,9 +1277,7 @@ def unreshape_order(order: np.ndarray, partitions: np.ndarray) -> np.ndarray:
     return np.concatenate([trivial_ord[cumul_ind_num[n]:cumul_ind_num[n+1]] for n in order])
     
 
-  
-  
-  
+
   
   
   

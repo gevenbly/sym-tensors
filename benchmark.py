@@ -13,7 +13,7 @@ from typing import List, Union, Any, Tuple, Type, Optional, Dict, Iterable
 import sym_tensor_toolbox as ST
 
 """
-Some benchmark problems for testing contraction times:
+Some benchmark problems for testing the efficientcy of the toolbox
 """
 
 """
@@ -224,7 +224,7 @@ t_U1_14 = time.time() - t0
 
 all_times = np.vstack([np.array([t_U1U1_6,t_U1U1_12,t_U1U1_14]), 
                        np.array([t_U1_6,t_U1_12,t_U1_14])]).T
-print("Contraction times:")
+print("Contraction times: U1xU1, U1")
 print(all_times)
 
 

@@ -14,6 +14,11 @@ from typing import List, Union, Any, Tuple, Type, Optional, Dict, Iterable
 import sym_tensor_toolbox as ST
 
 """
+Some examples demonstrating the use of the toolbox (in creating, manipulating 
+and contracting SymTensors).
+"""
+
+"""
 Example 1: Contract a pair of tensors using reshape, transpose, mat_mul. 
 Tensors are assumed symmetric w.r.t a single 'U1' symmetry (e.g. particle 
 conservation).
@@ -96,6 +101,10 @@ C_full = np.tensordot(A.toarray(), B.toarray(), axes=[A_cont,B_cont])
 
 # compare results
 print("symmetric contraction error:", LA.norm(C.toarray()-C_full))
+
+
+
+
 
 
 
