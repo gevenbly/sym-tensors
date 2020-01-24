@@ -1,4 +1,3 @@
-
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -37,11 +36,11 @@ q_ind = ST.SymIndex.rand(chi, syms)
 
 # create symmetric tensors with random elements
 A_indices = [q_ind]*A_ndim
-A_arrows = np.array([False]*A_ndim, dtype=bool)
-A = ST.SymTensor.rand(A_indices,A_arrows)
+A_arrows = [False]*A_ndim # all arrows incoming
+A = ST.SymTensor.rand(A_indices,A_arrows) 
 
 B_indices = [q_ind]*B_ndim
-B_arrows = np.array([True]*B_ndim, dtype=bool)
+B_arrows = [True]*B_ndim # all arrows outgoing
 B = ST.SymTensor.rand(B_indices,B_arrows)
 
 # generate random permutations
@@ -58,7 +57,7 @@ C_full = (A.toarray().transpose(A_perm_ord).reshape(chi**(A_ndim-cont_ndim),chi*
           B.toarray().transpose(B_perm_ord).reshape(chi**cont_ndim,chi**(B_ndim-cont_ndim))
           ).reshape([chi]*(A_ndim + B_ndim - 2*cont_ndim))
 
-# compare results
+# compare results (SymTensor contraction versus dense tensor contraction)
 print("symmetric contraction error:", LA.norm(C.toarray()-C_full))
 
 
@@ -82,11 +81,11 @@ q_ind = ST.SymIndex.create([q_spin,q_part], syms)
 
 # create symmetric tensors with random elements
 A_indices = [q_ind]*A_ndim
-A_arrows = np.array([False]*A_ndim, dtype=bool)
+A_arrows = [False]*A_ndim # all arrows incoming
 A = ST.SymTensor.rand(A_indices,A_arrows)
 
 B_indices = [q_ind]*B_ndim
-B_arrows = np.array([True]*B_ndim, dtype=bool)
+B_arrows = [True]*B_ndim # all arrows outgoing
 B = ST.SymTensor.rand(B_indices,B_arrows)
 
 # select random indices to contract together
@@ -99,11 +98,63 @@ C = ST.tensordot(A, B, axes=[A_cont,B_cont])
 # contract corresponding dense numpy arrays using numpy tensordot
 C_full = np.tensordot(A.toarray(), B.toarray(), axes=[A_cont,B_cont])
 
-# compare results
+# compare results (SymTensor contraction versus dense tensor contraction)
 print("symmetric contraction error:", LA.norm(C.toarray()-C_full))
 
 
+"""
+Example 3: Contract a tensor network using `ncon`. Tensors are assumed 
+symmetric w.r.t to a `U1` symmetry and a `Z2` symmetry. The network 
+corresponds to a tensor environment from a MERA.
+"""
+##############################################
+# Example problem parameters:
+syms = ['U1','Z2'] # symmetries in use
+chi0 = 8 # bond dimension (outgoing from isometry)
+chi1 = 6 # bond dimension (outgoing from disentangler)
+##############################################
 
+# create index of random qnums
+q_ind0 = ST.SymIndex.rand(chi0, syms) 
+q_ind1 = ST.SymIndex.rand(chi1, syms) 
+
+# initialize tensors (`u` disentanglers, `w` isometries, ham, rho)
+u_indices = [q_ind0, q_ind0, q_ind1, q_ind1]
+u_arrows = [False, False, True, True]
+u = ST.SymTensor.rand(u_indices,u_arrows)
+
+w_indices = [q_ind1, q_ind1, q_ind0]
+w_arrows = [False, False, True]
+w = ST.SymTensor.rand(w_indices,w_arrows)
+
+ham_indices = [q_ind0, q_ind0, q_ind0, q_ind0, q_ind0, q_ind0]
+ham_arrows = [False, False, False, True, True, True]
+ham = ST.SymTensor.rand(ham_indices,ham_arrows)
+
+rho_indices = [q_ind0, q_ind0, q_ind0, q_ind0, q_ind0, q_ind0]
+rho_arrows = [True, True, True, False, False, False]
+rho = ST.SymTensor.rand(rho_indices,rho_arrows)
+
+# contract a network using the `ncon` routine (from a 1d MERA algorithm) 
+tensors = [u,w,w,w,ham,u.conj(),u.conj(),w.conj(),w.conj(),w.conj(),rho.conj()]
+connects = [[4,6,15,14],[-4,15,19],[8,-3,18],[14,13,20],[3,5,7,-2,4,6],[-1,3,9,10],
+            [5,7,11,12],[10,11,22],[8,9,21],[12,13,23],[18,19,20,21,22,23]] 
+cont_order = [4, 6, 13, 5, 7, 8, 18, 21, 20, 23, 22, 9, 10, 14, 3, 11, 12, 15, 19] 
+u_env = ST.ncon(tensors, connects, cont_order)
+
+# contract corresponding network of dense np.ndarry using `ncon` routine
+uf = u.toarray()
+wf = w.toarray()
+hamf = ham.toarray()
+rhof = rho.toarray()
+tensors = [uf,wf,wf,wf,hamf,uf.conj(),uf.conj(),wf.conj(),wf.conj(),wf.conj(),rhof.conj()]
+connects = [[4,6,15,14],[-4,15,19],[8,-3,18],[14,13,20],[3,5,7,-2,4,6],[-1,3,9,10],
+            [5,7,11,12],[10,11,22],[8,9,21],[12,13,23],[18,19,20,21,22,23]] 
+cont_order = [4, 6, 13, 5, 7, 8, 18, 21, 20, 23, 22, 9, 10, 14, 3, 11, 12, 15, 19] 
+u_envf = ST.ncon(tensors, connects, cont_order)
+
+# compare results (SymTensor contraction versus dense tensor contraction)
+print("symmetric contraction error:", LA.norm(u_env.toarray()-u_envf))
 
 
 
