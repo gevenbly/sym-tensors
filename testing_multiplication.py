@@ -10,7 +10,9 @@ from timeit import default_timer as timer
 from typing import List, Union, Any, Tuple, Type, Optional, Dict, Iterable
 
 # import the symmetric tensor toolbox
-import sym_tensor_toolbox as ST
+from sym_index import SymIndex
+from sym_tensor import SymTensor
+import sym_toolbox as ST
 
 """
 Set of tests for the multiplication of two SymTensors using tensordot. 
@@ -41,16 +43,18 @@ for k in range(number_of_tests):
   ##############################################
   
   # create index of random qnums
-  q_ind = ST.SymIndex.rand(chi, syms) 
+  q_ind = SymIndex.rand(chi, syms) 
   
   # create symmetric tensors with random elements
   A_indices = [q_ind]*A_ndim
   A_arrows = np.array([False]*A_ndim, dtype=bool)
-  A = ST.SymTensor.rand(A_indices,A_arrows)
+  A_divergence = SymIndex.rand(1, syms)
+  A = SymTensor.rand(A_indices,A_arrows,A_divergence)
   
   B_indices = [q_ind]*B_ndim
   B_arrows = np.array([True]*B_ndim, dtype=bool)
-  B = ST.SymTensor.rand(B_indices,B_arrows)
+  B_divergence = SymIndex.rand(1, syms)
+  B = SymTensor.rand(B_indices,B_arrows,B_divergence)
   
   # select random indices to contract together
   A_cont = np.argsort(np.random.rand(A_ndim))[:cont_ndim]
@@ -79,11 +83,13 @@ for k in range(number_of_tests):
   # create symmetric tensors with random elements
   A_indices = [q_ind]*A_ndim
   A_arrows = np.array([False]*A_ndim, dtype=bool)
-  A = ST.SymTensor.rand(A_indices,A_arrows)
+  A_divergence = SymIndex.rand(1, syms)
+  A = ST.SymTensor.rand(A_indices,A_arrows,A_divergence)
   
   B_indices = [q_ind]*B_ndim
   B_arrows = np.array([True]*B_ndim, dtype=bool)
-  B = ST.SymTensor.rand(B_indices,B_arrows)
+  B_divergence = SymIndex.rand(1, syms)
+  B = ST.SymTensor.rand(B_indices,B_arrows,B_divergence)
   
   # select random indices to contract together
   A_cont = np.argsort(np.random.rand(A_ndim))[:cont_ndim]
@@ -112,11 +118,13 @@ for k in range(number_of_tests):
   # create symmetric tensors with random elements
   A_indices = [q_ind]*A_ndim
   A_arrows = np.array([False]*A_ndim, dtype=bool)
-  A = ST.SymTensor.rand(A_indices,A_arrows)
+  A_divergence = SymIndex.rand(1, syms)
+  A = ST.SymTensor.rand(A_indices,A_arrows,A_divergence)
   
   B_indices = [q_ind]*B_ndim
   B_arrows = np.array([True]*B_ndim, dtype=bool)
-  B = ST.SymTensor.rand(B_indices,B_arrows)
+  B_divergence = SymIndex.rand(1, syms)
+  B = ST.SymTensor.rand(B_indices,B_arrows,B_divergence)
   
   # select random indices to contract together
   A_cont = np.argsort(np.random.rand(A_ndim))[:cont_ndim]
@@ -145,11 +153,13 @@ for k in range(number_of_tests):
   # create symmetric tensors with random elements
   A_indices = [q_ind]*A_ndim
   A_arrows = np.array([False]*A_ndim, dtype=bool)
-  A = ST.SymTensor.rand(A_indices,A_arrows)
+  A_divergence = SymIndex.rand(1, syms)
+  A = ST.SymTensor.rand(A_indices,A_arrows,A_divergence)
   
   B_indices = [q_ind]*B_ndim
   B_arrows = np.array([True]*B_ndim, dtype=bool)
-  B = ST.SymTensor.rand(B_indices,B_arrows)
+  B_divergence = SymIndex.rand(1, syms)
+  B = ST.SymTensor.rand(B_indices,B_arrows,B_divergence)
   
   # select random indices to contract together
   A_cont = np.argsort(np.random.rand(A_ndim))[:cont_ndim]
@@ -178,11 +188,13 @@ for k in range(number_of_tests):
   # create symmetric tensors with random elements
   A_indices = [q_ind]*A_ndim
   A_arrows = np.array([False]*A_ndim, dtype=bool)
-  A = ST.SymTensor.rand(A_indices,A_arrows)
+  A_divergence = SymIndex.rand(1, syms)
+  A = ST.SymTensor.rand(A_indices,A_arrows,A_divergence)
   
   B_indices = [q_ind]*B_ndim
   B_arrows = np.array([True]*B_ndim, dtype=bool)
-  B = ST.SymTensor.rand(B_indices,B_arrows)
+  B_divergence = SymIndex.rand(1, syms)
+  B = ST.SymTensor.rand(B_indices,B_arrows,B_divergence)
   
   # select random indices to contract together
   A_cont = np.argsort(np.random.rand(A_ndim))[:cont_ndim]
@@ -212,11 +224,13 @@ for k in range(number_of_tests):
   # create symmetric tensors with random elements
   A_indices = [q_ind]*A_ndim
   A_arrows = np.array([False]*A_ndim, dtype=bool)
-  A = ST.SymTensor.rand(A_indices,A_arrows)
+  A_divergence = SymIndex.rand(1, syms)
+  A = ST.SymTensor.rand(A_indices,A_arrows,A_divergence)
   
   B_indices = [q_ind]*B_ndim
   B_arrows = np.array([True]*B_ndim, dtype=bool)
-  B = ST.SymTensor.rand(B_indices,B_arrows)
+  A_divergence = SymIndex.rand(1, syms)
+  B = ST.SymTensor.rand(B_indices,B_arrows,B_divergence)
   
   # select random indices to contract together
   A_cont = np.argsort(np.random.rand(A_ndim))[:cont_ndim]
@@ -236,6 +250,7 @@ for k in range(number_of_tests):
     
   assert cont_error5 < tolerance
   
-  print("test:", k, "symmetric contraction errors:", [cont_error0,cont_error1,cont_error2,cont_error3,cont_error4,cont_error5])
+  print("test: %3d, tests : %5.2e, %5.2e, %5.2e, %5.2e, %5.2e, %5.2e" 
+        %(k,cont_error0,cont_error1,cont_error2,cont_error3,cont_error4,cont_error5))
 
 
