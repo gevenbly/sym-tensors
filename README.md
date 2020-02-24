@@ -1,5 +1,5 @@
 -----------------------------------------------------------------------------
-Glen's symmetric tensor toolbox: a toolbox for the efficient representation and manipulation of tensors that are invariant under the action of an abelian group.
+Glens' symmetric tensor toolbox: a toolbox for the efficient representation and manipulation of tensors that are invariant under the action of an abelian group.
 -----------------------------------------------------------------------------
 
 Core design features:
